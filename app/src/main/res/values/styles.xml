@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">@color/green</item>
+        <item name="colorPrimaryDark">@color/green</item>
+        <item name="colorAccent">@color/green</item>
+        <item name="android:windowBackground">@color/page_bg</item>
+        <item name="android:textColorPrimary">@color/text_main</item>
+        <item name="android:statusBarColor">@color/green</item>
+    </style>
+
+    <!-- SwitchCompat 绿色主题 -->
+    <style name="GreenSwitch">
+        <item name="colorControlActivated">@color/green</item>
+        <item name="android:colorForeground">@color/switch_off</item>
+    </style>
+
+    <style name="RowTitle">
+        <item name="android:textSize">15sp</item>
+        <item name="android:textColor">@color/text_main</item>
+    </style>
+
+    <style name="RowDesc">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/text_sub</item>
+        <item name="android:layout_marginTop">3dp</item>
+    </style>
+
+    <style name="SectionTitle">
+        <item name="android:textSize">13sp</item>
+        <item name="android:textColor">@color/text_sub</item>
+        <item name="android:paddingLeft">16dp</item>
+        <item name="android:paddingRight">16dp</item>
+        <item name="android:paddingTop">16dp</item>
+        <item name="android:paddingBottom">8dp</item>
+    </style>
+</resources>

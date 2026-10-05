@@ -1,0 +1,16 @@
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+.history/
+.DS_Store
+captures/
+*.jpg
+
+# 签名凭据，禁止入库
+keystore.properties
+*.keystore
+*.jks
+*.apk
