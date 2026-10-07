@@ -6,6 +6,7 @@ import android.media.AudioManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.text.TextUtils;
@@ -29,6 +30,7 @@ public final class Speaker {
     private static final class Task {
         final String text;
         final String recordId;
+        final long time = System.currentTimeMillis();
 
         Task(String text, String recordId) {
             this.text = text;
@@ -43,6 +45,50 @@ public final class Speaker {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static Context appCtx;
 
+    /** 消息在队列中的最长等待时间，超过即放弃（避免引擎恢复后突然补播旧通知） */
+    private static final long MAX_PENDING_MS = 120_000L;
+    /** 引擎初始化超时：超过视为引擎进程被冻结，重建 */
+    private static final long INIT_TIMEOUT_MS = 10_000L;
+    /** 引擎初始化失败最大重试次数 */
+    private static final int MAX_INIT_RETRY = 3;
+
+    private static volatile boolean initializing;
+    private static int initRetries;
+    private static int generation;
+    private static final List<InitCallback> PENDING = new ArrayList<>();
+    private static PowerManager.WakeLock wakeLock;
+
+    /** 初始化看门狗：引擎进程被系统冻结时 onInit 长时间不回调，超时重建 */
+    private static final Runnable INIT_WATCHDOG = new Runnable() {
+        @Override
+        public void run() {
+            if (ready || !initializing) return;
+            if (initRetries >= MAX_INIT_RETRY) {
+                initializing = false;
+                giveUp();
+                return;
+            }
+            initRetries++;
+            createEngine(currentEngine);
+        }
+    };
+
+    /** 引擎彻底不可用：清空队列并回写记录，消息不再无限滞留 */
+    private static void giveUp() {
+        List<Task> dropped;
+        synchronized (QUEUE) {
+            dropped = new ArrayList<>(QUEUE);
+            QUEUE.clear();
+        }
+        if (appCtx == null) return;
+        for (Task t : dropped) {
+            if (!TextUtils.isEmpty(t.recordId)) {
+                RecordStore.updateStatus(appCtx, t.recordId,
+                        SpeakRecord.STATUS_SKIPPED, "TTS 引擎不可用");
+            }
+        }
+    }
+
     private Speaker() {
     }
 
@@ -55,14 +101,28 @@ public final class Speaker {
             if (cb != null) cb.onReady(true);
             return;
         }
-        shutdown();
+        synchronized (PENDING) {
+            if (cb != null) PENDING.add(cb);
+        }
+        // 已有初始化在途：只挂回调，不重复创建，onInit 后统一处理
+        if (initializing) return;
+        createEngine(want);
+    }
 
+    private static void createEngine(final String want) {
+        shutdown();
         currentEngine = want;
+        final int gen = ++generation;
+        initializing = true;
         TextToSpeech.OnInitListener listener = new TextToSpeech.OnInitListener() {
             @Override
             public void onInit(int status) {
+                if (gen != generation) return;
+                MAIN.removeCallbacks(INIT_WATCHDOG);
+                initializing = false;
                 ready = status == TextToSpeech.SUCCESS;
                 if (ready) {
+                    initRetries = 0;
                     try {
                         tts.setLanguage(java.util.Locale.CHINA);
                     } catch (Throwable ignored) {
@@ -73,8 +133,30 @@ public final class Speaker {
                             .build());
                     tts.setOnUtteranceProgressListener(PROGRESS);
                 }
-                if (cb != null) cb.onReady(ready);
-                if (ready) drain();
+                List<InitCallback> cbs;
+                synchronized (PENDING) {
+                    cbs = new ArrayList<>(PENDING);
+                    PENDING.clear();
+                }
+                for (InitCallback b : cbs) {
+                    try {
+                        b.onReady(ready);
+                    } catch (Throwable ignored) {
+                    }
+                }
+                if (ready) {
+                    drain();
+                } else if (initRetries < MAX_INIT_RETRY) {
+                    initRetries++;
+                    MAIN.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (!ready && !initializing) createEngine(Prefs.ttsEngine(appCtx));
+                        }
+                    }, 2000L);
+                } else {
+                    giveUp();
+                }
             }
         };
 
@@ -83,6 +165,7 @@ public final class Speaker {
         } else {
             tts = new TextToSpeech(appCtx, listener, want);
         }
+        MAIN.postDelayed(INIT_WATCHDOG, INIT_TIMEOUT_MS);
     }
 
     private static final UtteranceProgressListener PROGRESS = new UtteranceProgressListener() {
@@ -93,6 +176,7 @@ public final class Speaker {
 
         @Override
         public void onDone(String utteranceId) {
+            afterUtterance();
             VolumeWatcher.markSpeaking(false);
             if (appCtx != null && !TextUtils.isEmpty(utteranceId)) {
                 RecordStore.updateStatus(appCtx, utteranceId, SpeakRecord.STATUS_SPOKEN, "");
@@ -107,6 +191,7 @@ public final class Speaker {
 
         @Override
         public void onError(String utteranceId) {
+            afterUtterance();
             VolumeWatcher.markSpeaking(false);
             if (appCtx != null && !TextUtils.isEmpty(utteranceId)) {
                 RecordStore.updateStatus(appCtx, utteranceId, SpeakRecord.STATUS_SKIPPED, "TTS 合成失败");
@@ -156,13 +241,26 @@ public final class Speaker {
         if (!ready || tts == null) return;
         if (tts.isSpeaking()) return;
 
+        long now = System.currentTimeMillis();
         Task t;
         synchronized (QUEUE) {
             t = QUEUE.poll();
         }
+        // 滞留超时的消息直接放弃，避免引擎恢复后突然补播旧通知
+        while (t != null && now - t.time > MAX_PENDING_MS) {
+            if (appCtx != null && !TextUtils.isEmpty(t.recordId)) {
+                RecordStore.updateStatus(appCtx, t.recordId,
+                        SpeakRecord.STATUS_SKIPPED, "播报延迟超时，已放弃");
+            }
+            synchronized (QUEUE) {
+                t = QUEUE.poll();
+            }
+        }
         if (t == null) return;
 
         applyParams();
+        acquireWakeLock();
+        requestAudioFocus();
 
         Bundle params = new Bundle();
         params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, Prefs.volume(appCtx));
@@ -173,6 +271,7 @@ public final class Speaker {
                 : t.recordId;
         int r = tts.speak(t.text, TextToSpeech.QUEUE_ADD, params, id);
         if (r != TextToSpeech.SUCCESS) {
+            afterUtterance();
             if (appCtx != null && !TextUtils.isEmpty(t.recordId)) {
                 RecordStore.updateStatus(appCtx, t.recordId,
                         SpeakRecord.STATUS_SKIPPED, "TTS 调用失败");
@@ -183,6 +282,52 @@ public final class Speaker {
                     drain();
                 }
             }, 200);
+        }
+    }
+
+    /** 息屏播报时持有唤醒锁，防止 CPU 休眠导致合成被推迟 */
+    private static void acquireWakeLock() {
+        if (appCtx == null) return;
+        try {
+            PowerManager pm = (PowerManager) appCtx.getSystemService(Context.POWER_SERVICE);
+            if (pm == null || pm.isInteractive()) return;
+            if (wakeLock == null) {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "msgnotify:tts");
+                wakeLock.setReferenceCounted(false);
+            }
+            wakeLock.acquire(60_000L);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 请求短暂音频焦点，唤醒音频通路（duck 模式，不打断音乐） */
+    private static void requestAudioFocus() {
+        if (appCtx == null) return;
+        try {
+            AudioManager am = (AudioManager) appCtx.getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                am.requestAudioFocus(null, AudioManager.STREAM_MUSIC,
+                        AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 单条播报结束后的统一清理 */
+    private static void afterUtterance() {
+        if (appCtx == null) return;
+        try {
+            AudioManager am = (AudioManager) appCtx.getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) am.abandonAudioFocus(null);
+        } catch (Throwable ignored) {
+        }
+        releaseWakeLock();
+    }
+
+    private static void releaseWakeLock() {
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        } catch (Throwable ignored) {
         }
     }
 
@@ -210,6 +355,7 @@ public final class Speaker {
             } catch (Throwable ignored) {
             }
         }
+        afterUtterance();
         VolumeWatcher.markSpeaking(false);
     }
 
@@ -231,6 +377,8 @@ public final class Speaker {
         }
         tts = null;
         ready = false;
+        MAIN.removeCallbacks(INIT_WATCHDOG);
+        releaseWakeLock();
     }
 
     /** 可用 TTS 引擎列表 */
