@@ -40,7 +40,8 @@ public class PhoneCallReceiver extends BroadcastReceiver {
         String who = displayName(context, number);
         SpeakGate.handle(context, "android.phone", "电话",
                 TextUtils.isEmpty(who) ? "" : who,
-                TextUtils.isEmpty(who) ? "有新来电" : "来电话了", false);
+                TextUtils.isEmpty(who) ? "有新来电" : "来电话了",
+                null, false, System.currentTimeMillis());
     }
 
     private String displayName(Context c, String number) {

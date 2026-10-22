@@ -291,6 +291,37 @@
                 </LinearLayout>
 
                 <LinearLayout
+                    android:id="@+id/rowDebug"
+                    android:layout_width="match_parent"
+                    android:layout_height="54dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="12dp">
+
+                    <ImageView
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:contentDescription="@string/app_name"
+                        android:src="@drawable/ic_m_debug" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:layout_weight="1"
+                        android:text="调试日志"
+                        android:textColor="@color/text_main"
+                        android:textSize="15sp" />
+
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:contentDescription="@string/app_name"
+                        android:src="@drawable/ic_chevron" />
+                </LinearLayout>
+
+                <LinearLayout
                     android:id="@+id/rowPermission"
                     android:layout_width="match_parent"
                     android:layout_height="54dp"
@@ -365,6 +396,20 @@
                 android:text="发条通知检测播报"
                 android:textColor="@color/white"
                 android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/btnDirectSpeak"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginStart="12dp"
+                android:layout_marginTop="10dp"
+                android:layout_marginEnd="12dp"
+                android:layout_marginBottom="16dp"
+                android:background="@drawable/bg_btn_outline"
+                android:gravity="center"
+                android:text="直接试听（绕过通知监听）"
+                android:textColor="@color/green_dark"
+                android:textSize="15sp" />
         </LinearLayout>
     </ScrollView>
 </LinearLayout>

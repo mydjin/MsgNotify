@@ -1,9 +1,6 @@
 package com.msgnotify.app.ui;
 
 import android.Manifest;
-import android.app.Notification;
-import android.app.NotificationManager;
-import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -23,6 +20,7 @@ import com.msgnotify.app.R;
 import com.msgnotify.app.core.Prefs;
 import com.msgnotify.app.core.RecordStore;
 import com.msgnotify.app.core.Speaker;
+import com.msgnotify.app.core.TestSpeakHelper;
 import com.msgnotify.app.service.KeepAliveService;
 import com.msgnotify.app.service.NotifyListener;
 import com.msgnotify.app.util.SysNav;
@@ -77,13 +75,20 @@ public class MainActivity extends BaseActivity {
         go(R.id.rowVoice, VoiceActivity.class);
         go(R.id.rowSpeak, SpeakSettingsActivity.class);
         go(R.id.rowRecord, RecordActivity.class);
+        go(R.id.rowDebug, DebugLogActivity.class);
         go(R.id.rowPermission, PermissionActivity.class);
         go(R.id.rowFaq, FaqActivity.class);
 
         findViewById(R.id.btnTest).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                sendTestNotification();
+                TestSpeakHelper.sendTestNotification(MainActivity.this);
+            }
+        });
+        findViewById(R.id.btnDirectSpeak).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                TestSpeakHelper.directSpeak(MainActivity.this);
             }
         });
 
@@ -105,6 +110,7 @@ public class MainActivity extends BaseActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        TestSpeakHelper.tryAutoHeal(this);
         refreshState();
         applyKeepScreenOn();
     }
@@ -112,11 +118,12 @@ public class MainActivity extends BaseActivity {
     private void refreshState() {
         boolean granted = NotifyListener.isPermissionGranted(this);
         if (granted) {
-            ivStatus.setImageResource(R.drawable.ic_check);
-            tvStatus.setText(NotifyListener.isConnected()
+            boolean connected = NotifyListener.isConnected();
+            ivStatus.setImageResource(connected ? R.drawable.ic_check : R.drawable.ic_warn);
+            tvStatus.setText(connected
                     ? "通知读取权限已开启，服务运行中"
-                    : "通知读取权限已开启（服务待唤醒）");
-            tvStatusAction.setText("查看");
+                    : "服务未连接，点此修复");
+            tvStatusAction.setText(connected ? "查看" : "去修复");
         } else {
             ivStatus.setImageResource(R.drawable.ic_warn);
             tvStatus.setText("未开启通知读取权限，无法播报");
@@ -151,27 +158,4 @@ public class MainActivity extends BaseActivity {
         }
     }
 
-    /**
-     * 发一条自检通知。该通知带 {@link NotifyListener#TEST_TAG}，
-     * 会被监听服务识别为自检消息并强制播报（绕过应用选择与关键词过滤）。
-     */
-    private void sendTestNotification() {
-        if (!NotifyListener.isPermissionGranted(this)) {
-            Toast.makeText(this, "请先开启通知读取权限", Toast.LENGTH_LONG).show();
-            SysNav.openNotificationListenerSettings(this);
-            return;
-        }
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm == null) return;
-        KeepAliveService.createChannels(this);
-
-        Notification n = new Notification.Builder(this, KeepAliveService.CHANNEL_TEST)
-                .setContentTitle("播报自检")
-                .setContentText("这是一条测试通知，如果你听到这句话说明播报正常")
-                .setSmallIcon(R.drawable.ic_m_voice)
-                .setAutoCancel(true)
-                .build();
-        nm.notify(NotifyListener.TEST_TAG, 2001, n);
-        Toast.makeText(this, "已发出测试通知，请留意播报声音", Toast.LENGTH_SHORT).show();
-    }
 }

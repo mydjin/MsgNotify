@@ -57,6 +57,30 @@ public final class Prefs {
     public static final String DND_START = "dndStart";
     public static final String DND_END = "dndEnd";
 
+    // 信息长度播报：正文超长时改播自定义短文案
+    public static final String LEN_LIMIT_ENABLED = "lenLimitEnabled";
+    public static final String LEN_LIMIT_CHARS = "lenLimitChars";
+    public static final String LEN_LIMIT_MSG = "lenLimitMsg";
+    public static final int LEN_LIMIT_CHARS_DEFAULT = 30;
+    public static final String LEN_LIMIT_MSG_DEFAULT = "具体消息请打开微信";
+
+    // 语音消息：优先原声附件，失败回退占位 TTS
+    public static final String VOICE_MSG_ENABLED = "voiceMsgEnabled";
+    public static final String VOICE_MSG_PLACEHOLDER = "voiceMsgPlaceholder";
+    public static final String VOICE_MSG_PLACEHOLDER_DEFAULT = "发来一条语音";
+
+    // 同人短时多条合并
+    public static final String BURST_MERGE_ENABLED = "burstMergeEnabled";
+    public static final String BURST_MERGE_WINDOW_SEC = "burstMergeWindowSec";
+    public static final String BURST_MERGE_COUNT = "burstMergeCount";
+    public static final String BURST_MERGE_SUFFIX = "burstMergeSuffix";
+    public static final int BURST_MERGE_WINDOW_SEC_DEFAULT = 5;
+    public static final int BURST_MERGE_COUNT_DEFAULT = 3;
+    public static final String BURST_MERGE_SUFFIX_DEFAULT = "发来多条消息";
+
+    /** 开发者模式强保活（耗电，仅排障） */
+    public static final String DEV_KEEP_ALIVE = "devKeepAlive";
+
     private static SharedPreferences sp(Context c) {
         return c.getApplicationContext().getSharedPreferences(FILE, Context.MODE_PRIVATE);
     }
@@ -187,5 +211,51 @@ public final class Prefs {
 
     public static boolean foregroundEnabled(Context c) {
         return getBool(c, FOREGROUND_ENABLED, true);
+    }
+
+    public static boolean lenLimitEnabled(Context c) {
+        return getBool(c, LEN_LIMIT_ENABLED, false);
+    }
+
+    public static int lenLimitChars(Context c) {
+        int v = getInt(c, LEN_LIMIT_CHARS, LEN_LIMIT_CHARS_DEFAULT);
+        return v < 1 ? LEN_LIMIT_CHARS_DEFAULT : v;
+    }
+
+    public static String lenLimitMsg(Context c) {
+        String s = getStr(c, LEN_LIMIT_MSG, LEN_LIMIT_MSG_DEFAULT);
+        return s == null || s.trim().isEmpty() ? LEN_LIMIT_MSG_DEFAULT : s;
+    }
+
+    public static boolean voiceMsgEnabled(Context c) {
+        return getBool(c, VOICE_MSG_ENABLED, true);
+    }
+
+    public static String voiceMsgPlaceholder(Context c) {
+        String s = getStr(c, VOICE_MSG_PLACEHOLDER, VOICE_MSG_PLACEHOLDER_DEFAULT);
+        return s == null || s.trim().isEmpty() ? VOICE_MSG_PLACEHOLDER_DEFAULT : s;
+    }
+
+    public static boolean burstMergeEnabled(Context c) {
+        return getBool(c, BURST_MERGE_ENABLED, true);
+    }
+
+    public static int burstMergeWindowSec(Context c) {
+        int v = getInt(c, BURST_MERGE_WINDOW_SEC, BURST_MERGE_WINDOW_SEC_DEFAULT);
+        return v < 1 ? BURST_MERGE_WINDOW_SEC_DEFAULT : v;
+    }
+
+    public static int burstMergeCount(Context c) {
+        int v = getInt(c, BURST_MERGE_COUNT, BURST_MERGE_COUNT_DEFAULT);
+        return v < 1 ? BURST_MERGE_COUNT_DEFAULT : v;
+    }
+
+    public static String burstMergeSuffix(Context c) {
+        String s = getStr(c, BURST_MERGE_SUFFIX, BURST_MERGE_SUFFIX_DEFAULT);
+        return s == null || s.trim().isEmpty() ? BURST_MERGE_SUFFIX_DEFAULT : s;
+    }
+
+    public static boolean devKeepAlive(Context c) {
+        return getBool(c, DEV_KEEP_ALIVE, false);
     }
 }

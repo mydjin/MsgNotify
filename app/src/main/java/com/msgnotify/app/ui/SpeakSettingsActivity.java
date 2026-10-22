@@ -5,8 +5,10 @@ import android.app.TimePickerDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.view.View;
 import android.widget.CompoundButton;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.TimePicker;
 import android.widget.Toast;
@@ -21,7 +23,7 @@ import com.msgnotify.app.core.Prefs;
 import com.msgnotify.app.service.KeepAliveService;
 
 /**
- * 播报设置：耳机模式、屏幕常亮、音量减打断、常驻保活、来电短信、免打扰时段、关键词入口
+ * 播报设置：耳机模式、屏幕常亮、音量减打断、常驻保活、语音消息、长度播报、同人合并、来电短信、免打扰时段、关键词入口
  */
 public class SpeakSettingsActivity extends BaseActivity {
 
@@ -35,6 +37,18 @@ public class SpeakSettingsActivity extends BaseActivity {
 
     private SwitchCompat swCall;
     private SwitchCompat swSms;
+    private SwitchCompat swLenLimit;
+    private View boxLenLimitFields;
+    private EditText etLenLimitChars;
+    private EditText etLenLimitMsg;
+    private SwitchCompat swVoiceMsg;
+    private View boxVoiceMsgFields;
+    private EditText etVoiceMsgPlaceholder;
+    private SwitchCompat swBurstMerge;
+    private View boxBurstMergeFields;
+    private EditText etBurstMergeWindow;
+    private EditText etBurstMergeCount;
+    private EditText etBurstMergeSuffix;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -62,6 +76,54 @@ public class SpeakSettingsActivity extends BaseActivity {
                     Toast.makeText(SpeakSettingsActivity.this,
                             "已关闭常驻通知，息屏后可能被系统回收", Toast.LENGTH_LONG).show();
                 }
+            }
+        });
+
+        swVoiceMsg = findViewById(R.id.swVoiceMsg);
+        boxVoiceMsgFields = findViewById(R.id.boxVoiceMsgFields);
+        etVoiceMsgPlaceholder = findViewById(R.id.etVoiceMsgPlaceholder);
+        swVoiceMsg.setChecked(Prefs.voiceMsgEnabled(this));
+        etVoiceMsgPlaceholder.setText(Prefs.voiceMsgPlaceholder(this));
+        applyVoiceMsgEnabled(swVoiceMsg.isChecked());
+        swVoiceMsg.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton v, boolean checked) {
+                Prefs.setBool(SpeakSettingsActivity.this, Prefs.VOICE_MSG_ENABLED, checked);
+                applyVoiceMsgEnabled(checked);
+            }
+        });
+
+        swLenLimit = findViewById(R.id.swLenLimit);
+        boxLenLimitFields = findViewById(R.id.boxLenLimitFields);
+        etLenLimitChars = findViewById(R.id.etLenLimitChars);
+        etLenLimitMsg = findViewById(R.id.etLenLimitMsg);
+        swLenLimit.setChecked(Prefs.lenLimitEnabled(this));
+        etLenLimitChars.setText(String.valueOf(Prefs.lenLimitChars(this)));
+        etLenLimitMsg.setText(Prefs.lenLimitMsg(this));
+        applyLenLimitEnabled(swLenLimit.isChecked());
+        swLenLimit.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton v, boolean checked) {
+                Prefs.setBool(SpeakSettingsActivity.this, Prefs.LEN_LIMIT_ENABLED, checked);
+                applyLenLimitEnabled(checked);
+            }
+        });
+
+        swBurstMerge = findViewById(R.id.swBurstMerge);
+        boxBurstMergeFields = findViewById(R.id.boxBurstMergeFields);
+        etBurstMergeWindow = findViewById(R.id.etBurstMergeWindow);
+        etBurstMergeCount = findViewById(R.id.etBurstMergeCount);
+        etBurstMergeSuffix = findViewById(R.id.etBurstMergeSuffix);
+        swBurstMerge.setChecked(Prefs.burstMergeEnabled(this));
+        etBurstMergeWindow.setText(String.valueOf(Prefs.burstMergeWindowSec(this)));
+        etBurstMergeCount.setText(String.valueOf(Prefs.burstMergeCount(this)));
+        etBurstMergeSuffix.setText(Prefs.burstMergeSuffix(this));
+        applyBurstMergeEnabled(swBurstMerge.isChecked());
+        swBurstMerge.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton v, boolean checked) {
+                Prefs.setBool(SpeakSettingsActivity.this, Prefs.BURST_MERGE_ENABLED, checked);
+                applyBurstMergeEnabled(checked);
             }
         });
 
@@ -117,9 +179,100 @@ public class SpeakSettingsActivity extends BaseActivity {
     }
 
     @Override
+    protected void onPause() {
+        saveVoiceMsgFields();
+        saveLenLimitFields();
+        saveBurstMergeFields();
+        super.onPause();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         refresh();
+    }
+
+    private void applyVoiceMsgEnabled(boolean enabled) {
+        boxVoiceMsgFields.setAlpha(enabled ? 1f : 0.45f);
+        etVoiceMsgPlaceholder.setEnabled(true);
+    }
+
+    private void applyLenLimitEnabled(boolean enabled) {
+        float alpha = enabled ? 1f : 0.45f;
+        boxLenLimitFields.setAlpha(alpha);
+        etLenLimitChars.setEnabled(true);
+        etLenLimitMsg.setEnabled(true);
+    }
+
+    private void applyBurstMergeEnabled(boolean enabled) {
+        float alpha = enabled ? 1f : 0.45f;
+        boxBurstMergeFields.setAlpha(alpha);
+        etBurstMergeWindow.setEnabled(true);
+        etBurstMergeCount.setEnabled(true);
+        etBurstMergeSuffix.setEnabled(true);
+    }
+
+    private void saveVoiceMsgFields() {
+        String msg = etVoiceMsgPlaceholder.getText() == null
+                ? "" : etVoiceMsgPlaceholder.getText().toString().trim();
+        if (TextUtils.isEmpty(msg)) msg = Prefs.VOICE_MSG_PLACEHOLDER_DEFAULT;
+        Prefs.setStr(this, Prefs.VOICE_MSG_PLACEHOLDER, msg);
+        etVoiceMsgPlaceholder.setText(msg);
+    }
+
+    private void saveLenLimitFields() {
+        String charsRaw = etLenLimitChars.getText() == null
+                ? "" : etLenLimitChars.getText().toString().trim();
+        int chars = Prefs.LEN_LIMIT_CHARS_DEFAULT;
+        if (!TextUtils.isEmpty(charsRaw)) {
+            try {
+                int v = Integer.parseInt(charsRaw);
+                if (v >= 1) chars = v;
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        Prefs.setInt(this, Prefs.LEN_LIMIT_CHARS, chars);
+        etLenLimitChars.setText(String.valueOf(chars));
+
+        String msg = etLenLimitMsg.getText() == null
+                ? "" : etLenLimitMsg.getText().toString().trim();
+        if (TextUtils.isEmpty(msg)) msg = Prefs.LEN_LIMIT_MSG_DEFAULT;
+        Prefs.setStr(this, Prefs.LEN_LIMIT_MSG, msg);
+        etLenLimitMsg.setText(msg);
+    }
+
+    private void saveBurstMergeFields() {
+        String winRaw = etBurstMergeWindow.getText() == null
+                ? "" : etBurstMergeWindow.getText().toString().trim();
+        int win = Prefs.BURST_MERGE_WINDOW_SEC_DEFAULT;
+        if (!TextUtils.isEmpty(winRaw)) {
+            try {
+                int v = Integer.parseInt(winRaw);
+                if (v >= 1) win = v;
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        Prefs.setInt(this, Prefs.BURST_MERGE_WINDOW_SEC, win);
+        etBurstMergeWindow.setText(String.valueOf(win));
+
+        String countRaw = etBurstMergeCount.getText() == null
+                ? "" : etBurstMergeCount.getText().toString().trim();
+        int count = Prefs.BURST_MERGE_COUNT_DEFAULT;
+        if (!TextUtils.isEmpty(countRaw)) {
+            try {
+                int v = Integer.parseInt(countRaw);
+                if (v >= 1) count = v;
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        Prefs.setInt(this, Prefs.BURST_MERGE_COUNT, count);
+        etBurstMergeCount.setText(String.valueOf(count));
+
+        String suffix = etBurstMergeSuffix.getText() == null
+                ? "" : etBurstMergeSuffix.getText().toString().trim();
+        if (TextUtils.isEmpty(suffix)) suffix = Prefs.BURST_MERGE_SUFFIX_DEFAULT;
+        Prefs.setStr(this, Prefs.BURST_MERGE_SUFFIX, suffix);
+        etBurstMergeSuffix.setText(suffix);
     }
 
     private void bind(final SwitchCompat sw, final String key, boolean def) {

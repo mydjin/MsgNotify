@@ -289,6 +289,20 @@
                 android:text="发条通知检测播报"
                 android:textColor="@color/green_dark"
                 android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/btnDirectSpeak"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginStart="12dp"
+                android:layout_marginTop="10dp"
+                android:layout_marginEnd="12dp"
+                android:layout_marginBottom="16dp"
+                android:background="@drawable/bg_btn_outline"
+                android:gravity="center"
+                android:text="直接试听（绕过通知监听）"
+                android:textColor="@color/green_dark"
+                android:textSize="15sp" />
         </LinearLayout>
     </ScrollView>
 </LinearLayout>

@@ -3,6 +3,7 @@ package com.msgnotify.app.service;
 import android.app.Notification;
 import android.content.ComponentName;
 import android.content.Context;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -12,8 +13,11 @@ import android.text.TextUtils;
 
 import androidx.core.app.NotificationCompat;
 
+import com.msgnotify.app.core.AppDebugLog;
+import com.msgnotify.app.core.ListenerHeal;
 import com.msgnotify.app.core.Prefs;
 import com.msgnotify.app.core.SpeakGate;
+import com.msgnotify.app.core.VoiceMsg;
 import com.msgnotify.app.util.Apps;
 
 import java.util.HashMap;
@@ -32,6 +36,19 @@ public class NotifyListener extends NotificationListenerService {
 
     private static boolean connected = false;
 
+    /** 从通知提取的正文与可选语音附件 */
+    private static final class Extracted {
+        final String content;
+        final Uri audioUri;
+        final String audioMime;
+
+        Extracted(String content, Uri audioUri, String audioMime) {
+            this.content = content == null ? "" : content;
+            this.audioUri = audioUri;
+            this.audioMime = audioMime == null ? "" : audioMime;
+        }
+    }
+
     public static boolean isConnected() {
         return connected;
     }
@@ -49,12 +66,17 @@ public class NotifyListener extends NotificationListenerService {
         return false;
     }
 
-    /** 主动请求系统重新绑定监听服务（权限页「检测并修复」用） */
+    /** 主动请求系统重新绑定监听服务 */
     public static void rebind(Context c) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            AppDebugLog.d("Notify", "rebind skipped sdk=" + Build.VERSION.SDK_INT);
+            return;
+        }
         try {
+            AppDebugLog.d("Notify", "rebind requested connected=" + connected);
             requestRebind(new ComponentName(c, NotifyListener.class));
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            AppDebugLog.d("Notify", "rebind failed " + t);
         }
     }
 
@@ -62,60 +84,106 @@ public class NotifyListener extends NotificationListenerService {
     public void onListenerConnected() {
         super.onListenerConnected();
         connected = true;
+        AppDebugLog.bind(this);
+        AppDebugLog.d("Notify", "onListenerConnected");
+        ListenerHeal.onConnected(this);
     }
 
     @Override
     public void onListenerDisconnected() {
         super.onListenerDisconnected();
         connected = false;
-        // 被系统杀掉后主动请求重新绑定
+        AppDebugLog.bind(this);
+        boolean rebound = false;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             try {
                 requestRebind(new ComponentName(this, NotifyListener.class));
-            } catch (Throwable ignored) {
+                rebound = true;
+            } catch (Throwable t) {
+                AppDebugLog.d("Notify", "onListenerDisconnected rebind failed " + t);
             }
         }
+        AppDebugLog.d("Notify", "onListenerDisconnected rebindRequested=" + rebound);
     }
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
         try {
             process(sbn);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            AppDebugLog.d("Notify", "onNotificationPosted error "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage());
         }
     }
 
     private void process(StatusBarNotification sbn) {
-        if (sbn == null || sbn.getNotification() == null) return;
-        if (!Prefs.masterEnabled(this)) return;
+        if (sbn == null || sbn.getNotification() == null) {
+            AppDebugLog.d("Notify", "skip null sbn/notification");
+            return;
+        }
 
         String pkg = sbn.getPackageName();
-        if (TextUtils.isEmpty(pkg)) return;
+        String tag = sbn.getTag();
+        boolean selfTest = getPackageName().equals(pkg) && TEST_TAG.equals(tag);
+        AppDebugLog.d("Notify", "posted pkg=" + (pkg == null ? "" : pkg)
+                + " tag=" + (tag == null ? "" : tag)
+                + " selfTest=" + selfTest
+                + " connected=" + connected);
+
+        // 自检通知不受总开关拦截（强制播报）
+        if (!selfTest && !Prefs.masterEnabled(this)) {
+            AppDebugLog.d("Notify", "skip master off pkg=" + (pkg == null ? "" : pkg));
+            return;
+        }
+
+        if (TextUtils.isEmpty(pkg)) {
+            AppDebugLog.d("Notify", "skip empty pkg");
+            return;
+        }
 
         Notification n = sbn.getNotification();
-        boolean selfTest = getPackageName().equals(pkg) && TEST_TAG.equals(sbn.getTag());
 
         // 过滤：本应用自身的常驻通知（测试通知除外）
-        if (getPackageName().equals(pkg) && !selfTest) return;
+        if (getPackageName().equals(pkg) && !selfTest) {
+            AppDebugLog.d("Notify", "skip self notify filtered");
+            return;
+        }
 
         // 过滤：分组汇总、持续进行中的通知（音乐、导航、下载进度等）
         if (!selfTest) {
-            if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return;
-            if ((n.flags & Notification.FLAG_ONGOING_EVENT) != 0) return;
-            // 未被选中的应用不播报
-            if (!Prefs.isPackageSelected(this, pkg)) return;
+            if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) {
+                AppDebugLog.d("Notify", "skip group summary pkg=" + pkg);
+                return;
+            }
+            if ((n.flags & Notification.FLAG_ONGOING_EVENT) != 0) {
+                AppDebugLog.d("Notify", "skip ongoing pkg=" + pkg);
+                return;
+            }
+            if (!Prefs.isPackageSelected(this, pkg)) {
+                AppDebugLog.d("Notify", "skip pkg not selected pkg=" + pkg);
+                return;
+            }
         }
 
         String title = extractTitle(n);
-        String content = extractContent(n);
-        if (TextUtils.isEmpty(title) && TextUtils.isEmpty(content)) return;
+        Extracted extracted = extract(n);
+        String content = extracted.content;
+        if (TextUtils.isEmpty(title) && TextUtils.isEmpty(content) && extracted.audioUri == null) {
+            AppDebugLog.d("Notify", "skip empty payload pkg=" + pkg);
+            return;
+        }
 
         // 去重：同一通知在短时间内重复 post
-        String key = sbn.getKey() + "|" + title + "|" + content;
+        String key = sbn.getKey() + "|" + title + "|" + content
+                + "|" + VoiceMsg.uriSummary(extracted.audioUri);
         long now = System.currentTimeMillis();
         synchronized (RECENT) {
             Long last = RECENT.get(key);
-            if (last != null && now - last < DEDUP_WINDOW) return;
+            if (last != null && now - last < DEDUP_WINDOW) {
+                AppDebugLog.d("Notify", "skip dedup pkg=" + pkg
+                        + " ageMs=" + (now - last));
+                return;
+            }
             RECENT.put(key, now);
             if (RECENT.size() > 100) {
                 java.util.Iterator<Map.Entry<String, Long>> it = RECENT.entrySet().iterator();
@@ -125,8 +193,25 @@ public class NotifyListener extends NotificationListenerService {
             }
         }
 
+        boolean voicePlaceholder = VoiceMsg.isVoiceContent(content);
+        boolean hasAudio = extracted.audioUri != null && VoiceMsg.isAudioMime(extracted.audioMime);
+        AppDebugLog.d("Notify", "voice detect pkg=" + pkg
+                + " voicePlaceholder=" + voicePlaceholder
+                + " hasAudioUri=" + hasAudio
+                + " mime=" + extracted.audioMime
+                + " uri=" + VoiceMsg.uriSummary(extracted.audioUri)
+                + " contentLen=" + content.length());
+
         String appName = Apps.appName(this, pkg);
-        SpeakGate.handle(this, pkg, appName, title, content, selfTest);
+        long notifyTime = sbn.getPostTime();
+        if (notifyTime <= 0L) notifyTime = now;
+        AppDebugLog.d("Notify", "forward pkg=" + pkg + " selfTest=" + selfTest
+                + " titleLen=" + (title == null ? 0 : title.length())
+                + " contentLen=" + content.length()
+                + " postAgeMs=" + (now - notifyTime)
+                + " connected=" + connected);
+        SpeakGate.handle(this, pkg, appName, title, content,
+                hasAudio ? extracted.audioUri : null, selfTest, notifyTime);
     }
 
     private String extractTitle(Notification n) {
@@ -141,12 +226,16 @@ public class NotifyListener extends NotificationListenerService {
     /**
      * 内容提取，重点处理微信「x 条消息」折叠的情况：
      * MessagingStyle 最新消息 -> BIG_TEXT -> TEXT -> TEXT_LINES 最后一行
+     * 同时尝试读取 MessagingStyle 附件中的 audio URI
      */
-    private String extractContent(Notification n) {
+    private Extracted extract(Notification n) {
         Bundle ex = n.extras;
-        if (ex == null) return "";
+        if (ex == null) return new Extracted("", null, "");
 
-        // 1) MessagingStyle（微信、QQ 等聊天类通知常用）
+        Uri audioUri = null;
+        String audioMime = "";
+        String content = "";
+
         try {
             NotificationCompat.MessagingStyle ms =
                     NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(n);
@@ -155,38 +244,49 @@ public class NotifyListener extends NotificationListenerService {
                 if (msgs != null && !msgs.isEmpty()) {
                     NotificationCompat.MessagingStyle.Message last = msgs.get(msgs.size() - 1);
                     CharSequence text = last.getText();
-                    if (!TextUtils.isEmpty(text)) return clean(text.toString());
+                    if (!TextUtils.isEmpty(text)) content = clean(text.toString());
+                    Uri data = last.getDataUri();
+                    String mime = last.getDataMimeType();
+                    if (data != null && VoiceMsg.isAudioMime(mime)) {
+                        audioUri = data;
+                        audioMime = mime;
+                    }
                 }
             }
         } catch (Throwable ignored) {
         }
 
-        // 2) 展开后的长文本
-        CharSequence big = ex.getCharSequence(Notification.EXTRA_BIG_TEXT);
-        if (!TextUtils.isEmpty(big)) return clean(big.toString());
+        if (!TextUtils.isEmpty(content)) {
+            return new Extracted(content, audioUri, audioMime);
+        }
 
-        // 3) 普通文本
+        CharSequence big = ex.getCharSequence(Notification.EXTRA_BIG_TEXT);
+        if (!TextUtils.isEmpty(big)) {
+            return new Extracted(clean(big.toString()), audioUri, audioMime);
+        }
+
         CharSequence txt = ex.getCharSequence(Notification.EXTRA_TEXT);
         if (!TextUtils.isEmpty(txt)) {
             String s = clean(txt.toString());
-            // 「[2条]xxx」之类前缀清理
             s = s.replaceFirst("^\\[\\d+条?\\]\\s*", "");
-            if (!isFoldedSummary(s)) return s;
-        }
-
-        // 4) 收件箱样式多行，取最后一行（最新）
-        CharSequence[] lines = ex.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
-        if (lines != null && lines.length > 0) {
-            for (int i = lines.length - 1; i >= 0; i--) {
-                if (!TextUtils.isEmpty(lines[i])) return clean(lines[i].toString());
+            if (!isFoldedSummary(s)) {
+                return new Extracted(s, audioUri, audioMime);
             }
         }
 
-        // 5) 实在拿不到就回退到原始 text（即便是折叠提示）
-        return txt == null ? "" : clean(txt.toString());
+        CharSequence[] lines = ex.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+        if (lines != null && lines.length > 0) {
+            for (int i = lines.length - 1; i >= 0; i--) {
+                if (!TextUtils.isEmpty(lines[i])) {
+                    return new Extracted(clean(lines[i].toString()), audioUri, audioMime);
+                }
+            }
+        }
+
+        String fallback = txt == null ? "" : clean(txt.toString());
+        return new Extracted(fallback, audioUri, audioMime);
     }
 
-    /** 判断是否是「[3条]」「您有 3 条未读消息」这类折叠汇总文案 */
     private boolean isFoldedSummary(String s) {
         return s.matches("^\\d+条(新)?消息$")
                 || s.matches("^你有\\d+条新消息$")

@@ -44,7 +44,8 @@ public class SmsReceiver extends BroadcastReceiver {
         for (Map.Entry<String, StringBuilder> e : merged.entrySet()) {
             String body = e.getValue().toString().replaceAll("\\s+", " ").trim();
             if (TextUtils.isEmpty(body)) continue;
-            SpeakGate.handle(context, "android.sms", "短信", e.getKey(), body, false);
+            SpeakGate.handle(context, "android.sms", "短信", e.getKey(), body,
+                    null, false, System.currentTimeMillis());
         }
     }
 }

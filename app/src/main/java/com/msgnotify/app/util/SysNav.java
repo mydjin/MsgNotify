@@ -1,9 +1,11 @@
 package com.msgnotify.app.util;
 
+import android.app.AlarmManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.widget.Toast;
@@ -71,6 +73,32 @@ public final class SysNav {
     public static boolean isIgnoringBattery(Context c) {
         PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
         return pm != null && pm.isIgnoringBatteryOptimizations(c.getPackageName());
+    }
+
+    /** 是否已允许精确闹钟（Android 12+） */
+    public static boolean canScheduleExactAlarms(Context c) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
+        AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+        return am != null && am.canScheduleExactAlarms();
+    }
+
+    /** 打开「允许精确闹钟」设置（开发者模式强保活需要） */
+    public static void openExactAlarmSettings(Context c) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.parse("package:" + c.getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            c.startActivity(i);
+        } catch (Throwable e) {
+            try {
+                Intent i = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                c.startActivity(i);
+            } catch (Throwable ignored) {
+                openAppDetail(c);
+            }
+        }
     }
 
     /** TTS 系统设置页（文字转语音输出） */
